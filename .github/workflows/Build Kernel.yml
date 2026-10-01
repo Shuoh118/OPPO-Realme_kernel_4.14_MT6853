@@ -31,6 +31,11 @@ on:
         required: false
         default: false
 
+      nomount:
+        type: boolean
+        description: "是否启用 NoMount"
+        required: false
+        default: false
 
       TG:
         type: boolean
@@ -145,6 +150,22 @@ jobs:
           echo "KSU_LOG: Setup RKSU (rsuntk)"
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
         fi
+
+    - name: Setup NoMount
+      if: ${{ github.event.inputs.nomount == 'true' }}
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        echo "开始集成 NoMount..."
+        curl -LfsS \
+          https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh \
+          -o nomount-setup.sh \
+          || { echo "下载 NoMount setup 脚本失败"; exit 1; }
+        bash nomount-setup.sh dev
+        test -f fs/nomount/Kconfig && test -f fs/nomount/Makefile \
+          || { echo "NoMount 源码集成失败"; exit 1; }
+        grep -Fq 'source "fs/nomount/Kconfig"' fs/Kconfig \
+          && grep -Fq 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile \
+          || { echo "NoMount Kconfig/Makefile 集成失败"; exit 1; }
 
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@v1.2
@@ -294,7 +315,24 @@ jobs:
             --disable CONFIG_KSU_TRACEPOINT_HOOK
         fi
 
+        # NoMount 使用内建方式，随内核镜像一起打包
+        if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
+          echo "启用 NoMount..."
+          ./scripts/config --file out/.config --enable CONFIG_NOMOUNT
+        else
+          echo "不启用 NoMount..."
+          ./scripts/config --file out/.config --disable CONFIG_NOMOUNT
+        fi
+
         make O=out ARCH=arm64 olddefconfig
+
+        if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
+          grep -qx 'CONFIG_NOMOUNT=y' out/.config \
+            || { echo "NoMount 配置未生效，终止编译"; exit 1; }
+        elif grep -Eq '^CONFIG_NOMOUNT=(y|m)$' out/.config; then
+          echo "NoMount 未关闭，终止编译"
+          exit 1
+        fi
 
         # 编译
         make -j"$(nproc)" \
@@ -329,6 +367,9 @@ jobs:
         fi
         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
           NAME="${NAME}-SUSFS"
+        fi
+        if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
+          NAME="${NAME}-NoMount"
         fi
         echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
                 
@@ -390,6 +431,11 @@ jobs:
             echo "✅ SUSFS-V2.2.0"
           else
             echo "❌ SUSFS-V2.2.0"
+          fi
+          if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
+            echo "✅ NoMount"
+          else
+            echo "❌ NoMount"
           fi
           echo "</pre>"
           echo " "
