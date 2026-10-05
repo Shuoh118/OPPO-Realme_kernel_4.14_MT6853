@@ -117,8 +117,8 @@ jobs:
 
         elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
           echo "KSU_LOG: 选择了 SukiSU Ultra"
-          echo "KSU_LOG: SukiSU Ultra 使用 inline hooks，跳过 4.14 manual hook patch"
-          echo "KSU_LOG: SukiSU Ultra 不需要额外 patch，setup.sh 会处理所有集成"
+          echo "KSU_LOG: SukiSU Ultra 用符号链接集成，跳过 patch"
+          echo "KSU_LOG: SukiSU Ultra 会在 Setup KernelSU 步骤自动集成"
 
         else
           echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
@@ -536,4 +536,3 @@ jobs:
         python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
 
       
-    
