@@ -163,11 +163,10 @@ jobs:
             exit 1
           fi
           
-          # 验证 SukiSU 特有文件存在
-          if [ ! -f "KernelSU/kernel/sukisu.c" ] && [ ! -f "KernelSU/kernel/sukisu.h" ]; then
-            echo "ERROR: KernelSU 目录存在但缺少 SukiSU 特有文件"
+          # 验证 SukiSU 特有文件存在（SukiSU 的 kernel 是软链接）
+          if [ ! -L "KernelSU/kernel" ] && [ ! -d "KernelSU/core" ]; then
+            echo "ERROR: KernelSU 目录存在但结构异常"
             ls -la KernelSU/
-            ls -la KernelSU/kernel/ || true
             exit 1
           fi
           
@@ -541,6 +540,9 @@ jobs:
         echo "------------正在上传到 Telegram------------"
         pip3 install telethon
         python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
+
+      
+  
 
       
       
