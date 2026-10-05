@@ -12,6 +12,7 @@ on:
         options:
           - RKSU
           - BakaSU
+          - SukiSU
 
       BBR:
         type: boolean
@@ -114,6 +115,10 @@ jobs:
             patch -p1 < BakaSU-4.14.patch || { echo "BakaSU 官方 patch 应用失败"; cat BakaSU-4.14.patch; exit 1; }
           fi
 
+        elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
+          echo "KSU_LOG: 选择了 SukiSU Ultra"
+          echo "KSU_LOG: SukiSU Ultra 使用 inline hooks，跳过 4.14 manual hook patch"
+
         else
           echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
         fi
@@ -124,7 +129,6 @@ jobs:
           echo "KSU_LOG: 开启 SUSFS"
           wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
-          # A label cannot be followed directly by a declaration in GNU C89.
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
             || { echo "SUSFS fdinfo 4.14 兼容修正失败"; exit 1; }
@@ -135,6 +139,7 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         rm -rf KernelSU
+        
         if [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
           echo "KSU_LOG: Setup BakaSU"
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main
@@ -146,6 +151,28 @@ jobs:
               || { echo "下载 SUSFS inline hook 脚本失败"; exit 1; }
             bash susfs_inline_hook_patches.sh
           fi
+
+        elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
+          echo "KSU_LOG: Setup SukiSU Ultra"
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          
+          # 验证 SukiSU 源码已下载
+          if [ ! -d "KernelSU" ]; then
+            echo "ERROR: SukiSU setup.sh 执行后 KernelSU 目录不存在"
+            exit 1
+          fi
+          
+          # 验证 SukiSU 特有文件存在
+          if [ ! -f "KernelSU/kernel/sukisu.c" ] && [ ! -f "KernelSU/kernel/sukisu.h" ]; then
+            echo "ERROR: KernelSU 目录存在但缺少 SukiSU 特有文件"
+            ls -la KernelSU/
+            ls -la KernelSU/kernel/ || true
+            exit 1
+          fi
+          
+          echo "KSU_LOG: SukiSU Ultra 源码验证通过"
+          ls -la KernelSU/kernel/ | head -n 20
+
         else
           echo "KSU_LOG: Setup RKSU (rsuntk)"
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
@@ -180,7 +207,6 @@ jobs:
 
         make -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig
 
-        # DroidSpace
         if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
           echo "启用 DroidSpace..."
           ./scripts/config --file out/.config \
@@ -262,7 +288,6 @@ jobs:
           echo "不启用 DroidSpace，使用默认配置"
         fi
 
-        # BBR
         if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
           echo "启用 BBR..."
           ./scripts/config --file out/.config \
@@ -273,8 +298,6 @@ jobs:
           echo "不启用 BBR..."
         fi
 
-        # 最终配置修正
-        # DroidSpace 需要 USER_NS（docker unsafe procfs 修复），仅在启用时保留
         if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
           ./scripts/config --file out/.config \
                   --enable CONFIG_NAMESPACES \
@@ -291,8 +314,7 @@ jobs:
                   --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
         fi
 
-        # KernelSU 和 SUSFS 配置
-        # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
+        # KernelSU 配置
         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
           echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
           ./scripts/config --file out/.config \
@@ -307,8 +329,31 @@ jobs:
             --enable CONFIG_KSU_MANUAL_HOOK \
             --disable CONFIG_KSU_SUSFS \
             --disable CONFIG_KSU_TRACEPOINT_HOOK
-        fi
+        elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
+          echo "KSU_LOG: SukiSU Ultra 使用 inline hooks"
+          ./scripts/config --file out/.config \
+            --enable CONFIG_KSU \
+            --enable CONFIG_KSU_SUKISU \
+            --disable CONFIG_KSU_MANUAL_HOOK \
+            --disable CONFIG_KSU_SUSFS \
+            --disable CONFIG_KSU_TRACEPOINT_HOOK
+          
+          # 验证 SukiSU 配置生效
+          if ! grep -q "^CONFIG_KSU_SUKISU=y" out/.config; then
+            echo "ERROR: CONFIG_KSU_SUKISU 未生效"
+            grep CONFIG_KSU out/.config || echo "CONFIG_KSU 也不存在"
+            exit 1
+          fi
+          echo "KSU_LOG: SukiSU Ultra 配置验证通过"
 
+        elif [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
+          echo "KSU_LOG: RKSU 使用 manual hook"
+          ./scripts/config --file out/.config \
+            --enable CONFIG_KSU \
+            --enable CONFIG_KSU_MANUAL_HOOK \
+            --disable CONFIG_KSU_SUSFS \
+            --disable CONFIG_KSU_TRACEPOINT_HOOK
+        fi
 
         if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
           echo "启用 NoMount..."
@@ -331,7 +376,11 @@ jobs:
           exit 1
         fi
 
-        # 编译
+        # 编译前最终验证
+        echo "=== 编译前配置摘要 ==="
+        grep -E "^CONFIG_KSU|^CONFIG_NOMOUNT|^CONFIG_TCP_CONG_BBR|^CONFIG_USER_NS" out/.config || true
+        echo "===================="
+
         make -j"$(nproc)" \
                 O=out \
                 ARCH=arm64 \
@@ -348,11 +397,29 @@ jobs:
                 OBJDUMP=llvm-objdump \
                 STRIP=llvm-strip
 
+    - name: Verify kernel built
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        if [ ! -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
+          echo "ERROR: 内核编译失败，Image.gz-dtb 不存在"
+          ls -la out/arch/arm64/boot/ || true
+          exit 1
+        fi
+        
+        # 验证 SukiSU 是否编译进内核（检查符号）
+        if [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
+          if ! grep -q "sukisu" out/arch/arm64/boot/Image.gz-dtb 2>/dev/null; then
+            echo "WARNING: 内核镜像中未找到 sukisu 符号，可能编译未成功"
+          fi
+        fi
+
     - name: Generate artifact name
       id: gen_name
       run: |
         if [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
           NAME="MT6853-BakaSU"
+        elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
+          NAME="MT6853-SukiSU"
         else
           NAME="MT6853-RKSU"
         fi
@@ -411,6 +478,8 @@ jobs:
           echo "📦 Feature:"
           if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
             echo "Root方案:  RKSU"
+          elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
+            echo "Root方案:  SukiSU Ultra"
           else
             echo "Root方案:  BakaSU"
           fi
@@ -465,6 +534,6 @@ jobs:
         echo "------------正在上传到 Telegram------------"
         pip3 install telethon
         python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
-
-      
-      
+---"
+        pip3 install telethon
+        python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
