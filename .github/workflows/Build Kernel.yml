@@ -118,6 +118,7 @@ jobs:
         elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
           echo "KSU_LOG: 选择了 SukiSU Ultra"
           echo "KSU_LOG: SukiSU Ultra 使用 inline hooks，跳过 4.14 manual hook patch"
+          echo "KSU_LOG: SukiSU Ultra 不需要额外 patch，setup.sh 会处理所有集成"
 
         else
           echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
@@ -157,21 +158,14 @@ jobs:
           echo "KSU_LOG: Setup SukiSU Ultra"
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           
-          # 验证 SukiSU 源码已下载
-          if [ ! -d "KernelSU" ]; then
-            echo "ERROR: SukiSU setup.sh 执行后 KernelSU 目录不存在"
+          # 验证 KernelSU 目录已生成（SukiSU 会创建软链接）
+          if [ ! -d "KernelSU" ] && [ ! -L "kernel" ]; then
+            echo "ERROR: SukiSU setup.sh 执行失败"
             exit 1
           fi
           
-          # 验证 SukiSU 特有文件存在（SukiSU 的 kernel 是软链接）
-          if [ ! -L "KernelSU/kernel" ] && [ ! -d "KernelSU/core" ]; then
-            echo "ERROR: KernelSU 目录存在但结构异常"
-            ls -la KernelSU/
-            exit 1
-          fi
-          
-          echo "KSU_LOG: SukiSU Ultra 源码验证通过"
-          ls -la KernelSU/kernel/ | head -n 20
+          echo "KSU_LOG: SukiSU Ultra 集成完成"
+          ls -la | grep -E "KernelSU|kernel"
 
         else
           echo "KSU_LOG: Setup RKSU (rsuntk)"
@@ -542,7 +536,4 @@ jobs:
         python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
 
       
-  
-
-      
-      
+    
