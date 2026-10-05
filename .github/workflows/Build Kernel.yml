@@ -129,6 +129,7 @@ jobs:
           echo "KSU_LOG: 开启 SUSFS"
           wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
+          # A label cannot be followed directly by a declaration in GNU C89.
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
             || { echo "SUSFS fdinfo 4.14 兼容修正失败"; exit 1; }
@@ -207,6 +208,7 @@ jobs:
 
         make -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig
 
+        # DroidSpace
         if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
           echo "启用 DroidSpace..."
           ./scripts/config --file out/.config \
@@ -288,6 +290,7 @@ jobs:
           echo "不启用 DroidSpace，使用默认配置"
         fi
 
+        # BBR
         if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
           echo "启用 BBR..."
           ./scripts/config --file out/.config \
@@ -298,6 +301,8 @@ jobs:
           echo "不启用 BBR..."
         fi
 
+        # 最终配置修正
+        # DroidSpace 需要 USER_NS（docker unsafe procfs 修复），仅在启用时保留
         if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
           ./scripts/config --file out/.config \
                   --enable CONFIG_NAMESPACES \
@@ -314,7 +319,8 @@ jobs:
                   --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
         fi
 
-        # KernelSU 配置
+        # KernelSU 和 SUSFS 配置
+        # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
           echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
           ./scripts/config --file out/.config \
@@ -381,6 +387,7 @@ jobs:
         grep -E "^CONFIG_KSU|^CONFIG_NOMOUNT|^CONFIG_TCP_CONG_BBR|^CONFIG_USER_NS" out/.config || true
         echo "===================="
 
+        # 编译
         make -j"$(nproc)" \
                 O=out \
                 ARCH=arm64 \
@@ -534,6 +541,6 @@ jobs:
         echo "------------正在上传到 Telegram------------"
         pip3 install telethon
         python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
----"
-        pip3 install telethon
-        python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
+
+      
+      
