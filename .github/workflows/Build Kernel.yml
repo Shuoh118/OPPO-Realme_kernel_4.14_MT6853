@@ -156,11 +156,12 @@ jobs:
 
         elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
           echo "KSU_LOG: Setup SukiSU Ultra"
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          # 非 GKI 设备（如 MT6853 4.14）必须用 nongki 分支；main 分支官方不支持非 GKI 构建
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
           
           # 验证 KernelSU 目录已生成（SukiSU 会创建软链接）
-          if [ ! -d "KernelSU" ] && [ ! -L "kernel" ]; then
-            echo "ERROR: SukiSU setup.sh 执行失败"
+          if [ ! -e "KernelSU" ]; then
+            echo "ERROR: SukiSU setup.sh 执行失败，KernelSU 不存在"
             exit 1
           fi
           
@@ -312,34 +313,38 @@ jobs:
                   --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
         fi
 
-        # KernelSU 和 SUSFS 配置
-        # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
+        # KernelSU / SUSFS / hook 方式配置
+        # 先统一处理 SUSFS 开关
         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-          echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
+          echo "KSU_LOG: 启用 CONFIG_KSU_SUSFS"
+          SUSFS_EN=1
+        else
+          echo "KSU_LOG: 不启用 SUSFS"
+          SUSFS_EN=0
+        fi
+
+        # 统一开启 CONFIG_KSU
+        ./scripts/config --file out/.config --enable CONFIG_KSU
+
+        # 根据所选 SU 决定 hook 方式
+        if [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
+          # 非 GKI 4.14 推荐 KPROBES hook：无需修改内核源码，只需开启 CONFIG_KPROBES
+          echo "KSU_LOG: SukiSU Ultra 使用 KPROBES hook（非 GKI 4.14 推荐方式）"
           ./scripts/config --file out/.config \
-            --enable CONFIG_KSU \
-            --enable CONFIG_KSU_SUSFS \
+            --enable CONFIG_KPROBES \
+            --enable CONFIG_KALLSYMS \
+            --enable CONFIG_KALLSYMS_ALL \
             --disable CONFIG_KSU_MANUAL_HOOK \
             --disable CONFIG_KSU_TRACEPOINT_HOOK
-        elif [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
-          echo "KSU_LOG: BakaSU 不启用 SUSFS，使用 manual hook"
-          ./scripts/config --file out/.config \
-            --enable CONFIG_KSU \
-            --enable CONFIG_KSU_MANUAL_HOOK \
-            --disable CONFIG_KSU_SUSFS \
-            --disable CONFIG_KSU_TRACEPOINT_HOOK
-        elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
-          echo "KSU_LOG: SukiSU Ultra 使用符号链接集成"
-          ./scripts/config --file out/.config \
-            --enable CONFIG_KSU \
-            --disable CONFIG_KSU_MANUAL_HOOK \
-            --disable CONFIG_KSU_SUSFS \
-            --disable CONFIG_KSU_TRACEPOINT_HOOK
-          
-          # 强制启用 SukiSU（关键！）
+          if [ "$SUSFS_EN" = "1" ]; then
+            ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
+          else
+            ./scripts/config --file out/.config --disable CONFIG_KSU_SUSFS
+          fi
+
+          # 强制启用 SukiSU 标记（CONFIG_KSU_SUKISU 需由 SukiSU 的 Kconfig 声明，
+          # 否则 olddefconfig 会把它当未知符号丢弃，导致下面校验失败）
           echo "CONFIG_KSU_SUKISU=y" >> out/.config
-          
-          # 验证配置生效
           if ! grep -q "^CONFIG_KSU_SUKISU=y" out/.config; then
             echo "ERROR: CONFIG_KSU_SUKISU 未生效"
             grep CONFIG_KSU out/.config || echo "CONFIG_KSU 也不存在"
@@ -347,13 +352,27 @@ jobs:
           fi
           echo "KSU_LOG: SukiSU Ultra 配置验证通过"
 
+        elif [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
+          echo "KSU_LOG: BakaSU 使用 manual hook"
+          ./scripts/config --file out/.config \
+            --enable CONFIG_KSU_MANUAL_HOOK \
+            --disable CONFIG_KSU_TRACEPOINT_HOOK
+          if [ "$SUSFS_EN" = "1" ]; then
+            ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
+          else
+            ./scripts/config --file out/.config --disable CONFIG_KSU_SUSFS
+          fi
+
         elif [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
           echo "KSU_LOG: RKSU 使用 manual hook"
           ./scripts/config --file out/.config \
-            --enable CONFIG_KSU \
             --enable CONFIG_KSU_MANUAL_HOOK \
-            --disable CONFIG_KSU_SUSFS \
             --disable CONFIG_KSU_TRACEPOINT_HOOK
+          if [ "$SUSFS_EN" = "1" ]; then
+            ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
+          else
+            ./scripts/config --file out/.config --disable CONFIG_KSU_SUSFS
+          fi
         fi
 
         if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
@@ -408,9 +427,9 @@ jobs:
           exit 1
         fi
         
-        # 验证 SukiSU 是否编译进内核（检查符号）
+        # 验证 SukiSU 是否编译进内核（解压后再查符号，避免直接 grep 压缩镜像永远匹配不到）
         if [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
-          if ! grep -q "sukisu" out/arch/arm64/boot/Image.gz-dtb 2>/dev/null; then
+          if ! gzip -dc out/arch/arm64/boot/Image.gz-dtb 2>/dev/null | grep -q "sukisu"; then
             echo "WARNING: 内核镜像中未找到 sukisu 符号，可能编译未成功"
           fi
         fi
