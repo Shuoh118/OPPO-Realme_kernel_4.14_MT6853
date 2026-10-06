@@ -117,8 +117,15 @@ jobs:
 
         elif [ "${{ github.event.inputs.SU }}" = "SukiSU" ]; then
           echo "KSU_LOG: 选择了 SukiSU Ultra"
-          echo "KSU_LOG: SukiSU Ultra non-GKI 4.14 使用 kprobe hook"
-          echo "KSU_LOG: SukiSU Ultra 会在 Setup KernelSU 步骤用 kprobe 自动集成"
+          echo "KSU_LOG: SukiSU Ultra non-GKI 4.14 使用 manual hook"
+          echo "KSU_LOG: 下载并应用 SukiSU Ultra 官方 4.14 patch"
+          wget -O SukiSU-4.14.patch \
+              https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/patches/non-gki/kernel-4.14.patch \
+            || { echo "下载 SukiSU patch 失败，尝试备用地址"; \
+                 wget -O SukiSU-4.14.patch \
+                 https://raw.githubusercontent.com/ShirkNeko/susfs4ksu/non-gki/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch \
+                 || { echo "备用地址也失败"; exit 1; }; }
+          patch -p1 < SukiSU-4.14.patch || { echo "SukiSU patch 应用失败"; cat SukiSU-4.14.patch; exit 1; }
 
         else
           echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
@@ -538,4 +545,6 @@ jobs:
         python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
 
       
+      
  
+      
