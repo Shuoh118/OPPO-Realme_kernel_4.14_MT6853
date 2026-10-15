@@ -12,6 +12,7 @@ on:
         options:
           - RKSU
           - BakaSU
+          - 7kimisu
 
       BBR:
         type: boolean
@@ -27,7 +28,7 @@ on:
 
       SUSFS:
         type: boolean
-        description: "是否加入 SUSFS"
+        description: "是否加入 SUSFS（7kimisu 不支持，选 7kimisu 时请关闭）"
         required: false
         default: false
 
@@ -90,12 +91,18 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace
         CLONE_BRANCH="${{ github.event.inputs.Branch }}"
         echo "使用 $CLONE_BRANCH 分支"
-        git clone -b "$CLONE_BRANCH" --single-branch https://github.com/sanba0519/OPPO-Realme_kernel_4.14_MT6853.git android-kernel
+        git clone -b "$CLONE_BRANCH" --single-branch ${{ github.server_url }}/${{ github.repository }}.git android-kernel
         cd android-kernel
 
     - name: Apply patch
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+
+        if [ "${{ github.event.inputs.SU }}" = "7kimisu" ] && [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
+          echo "::error::7kimisu 暂不支持 SUSFS，请将 SUSFS 选项关闭后重新运行"
+          exit 1
+        fi
+
         if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
           echo "KSU_LOG: 选择了 RKSU"
           echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
@@ -113,6 +120,10 @@ jobs:
               || { echo "下载 BakaSU 官方 patch 失败"; exit 1; }
             patch -p1 < BakaSU-4.14.patch || { echo "BakaSU 官方 patch 应用失败"; cat BakaSU-4.14.patch; exit 1; }
           fi
+
+        elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
+          echo "KSU_LOG: 选择了 7kimisu"
+          echo "KSU_LOG: 7kimisu 使用 kprobe + syscall 表补丁方案，无需 manual hook patch"
 
         else
           echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
@@ -146,6 +157,29 @@ jobs:
               || { echo "下载 SUSFS inline hook 脚本失败"; exit 1; }
             bash susfs_inline_hook_patches.sh
           fi
+
+        elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
+          echo "KSU_LOG: Setup 7kimisu"
+          # 注意：不能使用 7kimisu 自带的 setup.sh —— 它内部 clone 的是上游 tiann/KernelSU，
+          # 会丢失 7kimisu 的内核侧改动。这里直接取用其 kernel/ 目录并自行接线。
+          git clone https://github.com/hartgerinktarcila-design/7kimisu.git 7kimisu-src || { echo "clone 7kimisu 失败"; exit 1; }
+          rm -rf drivers/kernelsu
+          cp -r 7kimisu-src/kernel drivers/kernelsu
+          # 7kimisu 的 kernel/Makefile 是外部模块（LKM）构建入口，内嵌构建必须移除，否则 Kbuild 会优先使用它
+          rm -f drivers/kernelsu/Makefile
+          # 带入 .git 以便 Kbuild 计算 KSU_VERSION
+          cp -r 7kimisu-src/.git drivers/kernelsu/.git
+
+          # 应用 4.14 兼容补丁
+          bash "$GITHUB_WORKSPACE/.github/patches/7kimisu-414-compat.sh" drivers/kernelsu \
+            || { echo "7kimisu 4.14 兼容补丁应用失败"; exit 1; }
+
+          # 接线（幂等）
+          grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile \
+            || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig \
+            || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+
         else
           echo "KSU_LOG: Setup RKSU (rsuntk)"
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
@@ -228,27 +262,14 @@ jobs:
             --enable NETFILTER_XT_MATCH_ADDRTYPE \
             --enable NF_CONNTRACK_NETLINK \
             --enable NF_NAT_REDIRECT \
-            --enable IP_ADVANCED_ROUTER \
-            --enable IP_MULTIPLE_TABLES \
-            --enable NF_CONNTRACK_IPV4 \
-            --enable NF_NAT_IPV4 \
-            --enable IP_NF_NAT \
-            --enable NETFILTER_XT_MATCH_COMMENT \
-            --enable NETFILTER_XT_MATCH_STATE \
-            --enable NETFILTER_XT_MATCH_CONNTRACK \
-            --enable NETFILTER_XT_MATCH_MULTIPORT \
-            --enable NETFILTER_XT_MATCH_HL \
-            --enable NETFILTER_XT_TARGET_REJECT \
             --enable IP_NF_TARGET_REJECT \
-            --enable NETFILTER_XT_TARGET_LOG \
-            --enable IP_NF_TARGET_ULOG \
-            --enable NETFILTER_XT_MATCH_RECENT \
-            --enable NETFILTER_XT_MATCH_LIMIT \
-            --enable NETFILTER_XT_MATCH_HASHLIMIT \
-            --enable NETFILTER_XT_MATCH_OWNER \
-            --enable NETFILTER_XT_MATCH_PKTTYPE \
-            --enable NETFILTER_XT_MATCH_MARK \
-            --enable NETFILTER_XT_TARGET_MARK \
+            --enable IP_NF_MATCH_RECENT \
+            --enable IP_NF_MATCH_LIMIT \
+            --enable IP_NF_MATCH_HASHLIMIT \
+            --enable IP_NF_MATCH_OWNER \
+            --enable IP_NF_MATCH_PKTTYPE \
+            --enable IP_NF_MATCH_MARK \
+            --enable IP_NF_TARGET_MARK \
             --enable IP_SET \
             --enable IP_SET_HASH_IP \
             --enable IP_SET_HASH_NET \
@@ -307,6 +328,16 @@ jobs:
             --enable CONFIG_KSU_MANUAL_HOOK \
             --disable CONFIG_KSU_SUSFS \
             --disable CONFIG_KSU_TRACEPOINT_HOOK
+        elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
+          echo "KSU_LOG: 7kimisu 使用 kprobe 方案，启用 KPROBES/KRETPROBES"
+          ./scripts/config --file out/.config \
+            --enable CONFIG_KSU \
+            --enable CONFIG_KPROBES \
+            --enable CONFIG_HAVE_KPROBES \
+            --enable CONFIG_KPROBE_EVENTS \
+            --enable CONFIG_KRETPROBES \
+            --disable CONFIG_KSU_MANUAL_HOOK \
+            --disable CONFIG_KSU_SUSFS
         fi
 
 
@@ -331,6 +362,14 @@ jobs:
           exit 1
         fi
 
+        # 7kimisu 依赖检查
+        if [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
+          grep -qx 'CONFIG_KSU=y' out/.config \
+            && grep -qx 'CONFIG_KPROBES=y' out/.config \
+            || { echo "CONFIG_KSU 或 CONFIG_KPROBES 未生效，终止编译"; exit 1; }
+          echo "KSU_LOG: 7kimisu 配置检查通过"
+        fi
+
         # 编译
         make -j"$(nproc)" \
                 O=out \
@@ -353,6 +392,8 @@ jobs:
       run: |
         if [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
           NAME="MT6853-BakaSU"
+        elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
+          NAME="MT6853-7kimisu"
         else
           NAME="MT6853-RKSU"
         fi
@@ -411,6 +452,8 @@ jobs:
           echo "📦 Feature:"
           if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
             echo "Root方案:  RKSU"
+          elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
+            echo "Root方案:  7kimisu"
           else
             echo "Root方案:  BakaSU"
           fi
