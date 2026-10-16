@@ -2,7 +2,7 @@
 # MT6853 内核云端构建工作流
 #
 # Root 方案（三选一）：
-#   RKSU     —— rsuntk/KernelSU 主线，manual hook
+#   RKSU     —— rsuntk/KernelSU（Rissu 的第三方分支，非官方主线），manual hook
 #   BakaSU   —— Baka-SU，manual hook / SUSFS 时用 inline hook
 #   7kimisu  —— kprobe + syscall 表方案，需 .github/patches/ 下的兼容补丁
 #
@@ -180,6 +180,7 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         rm -rf KernelSU
+        echo "KSU_LOG: [诊断] SU 实际接收值=[${{ github.event.inputs.SU }}]"
         if [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
           echo "KSU_LOG: Setup BakaSU"
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main
@@ -199,6 +200,16 @@ jobs:
           git clone https://github.com/hartgerinktarcila-design/7kimisu.git 7kimisu-src || { echo "clone 7kimisu 失败"; exit 1; }
           rm -rf drivers/kernelsu
           cp -r 7kimisu-src/kernel drivers/kernelsu
+          # 7kimisu 的 uapi/ 在仓库根级（不在 kernel/ 内），kernel/ 下 8 处源文件
+          # （policy/allowlist.h、policy/app_profile.h、policy/feature.h、selinux/rules.c、
+          #   sulog/event.h、supercall/dispatch.c、supercall/supercall.c、manager/apk_sign.c）
+          # 均以 "uapi/xxx.h" 引号形式引用，内嵌构建下由 Kbuild 的
+          # -I$(KSU_KERNEL_DIR)（即 drivers/kernelsu）解析，必须一并拷入，
+          # 否则报 fatal error: 'uapi/app_profile.h' file not found
+          if [ -d 7kimisu-src/uapi ]; then
+            cp -r 7kimisu-src/uapi drivers/kernelsu/uapi
+          fi
+          [ -f drivers/kernelsu/uapi/app_profile.h ] || { echo "7kimisu uapi 头文件缺失"; exit 1; }
           # 7kimisu 的 kernel/Makefile 是外部模块（LKM）构建入口，内嵌构建必须移除，否则 Kbuild 会优先使用它
           rm -f drivers/kernelsu/Makefile
           # 带入 .git 以便 Kbuild 计算 KSU_VERSION
