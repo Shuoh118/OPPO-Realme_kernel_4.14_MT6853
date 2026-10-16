@@ -189,9 +189,9 @@ jobs:
       if: ${{ github.event.inputs.SU == '7kimisu' }}
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        # 脚本位于本仓库 scripts/ 目录（通过 GitHub 网页拖拽上传，勿用粘贴）
-        cp "$GITHUB_WORKSPACE/scripts/7kimisu-414-compat.sh" . \
-          || { echo "scripts/7kimisu-414-compat.sh 缺失，请上传该脚本"; exit 1; }
+        # 脚本位于本仓库 .github/patches/ 目录（已上传，勿改动内容）
+        cp "$GITHUB_WORKSPACE/.github/patches/7kimisu-414-compat.sh" . \
+          || { echo ".github/patches/7kimisu-414-compat.sh 缺失，请上传该脚本"; exit 1; }
         test -s 7kimisu-414-compat.sh || { echo "compat 脚本落地失败"; exit 1; }
         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
           bash 7kimisu-414-compat.sh drivers/kernelsu susfs
