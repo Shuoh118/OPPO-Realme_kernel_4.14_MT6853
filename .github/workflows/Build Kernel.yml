@@ -1,34 +1,9 @@
-# ============================================================================
-# MT6853 内核云端构建工作流
-#
-# Root 方案（三选一）：
-#   RKSU     —— rsuntk/KernelSU（Rissu 的第三方分支，非官方主线），manual hook
-#   BakaSU   —— Baka-SU，manual hook / SUSFS 时用 inline hook
-#   7kimisu  —— kprobe + syscall 表方案，需 .github/patches/ 下的兼容补丁
-#
-# 可选组件：
-#   SUSFS      —— VFS 层用官方补丁；KSU 侧由各方案自行集成
-#                （7kimisu 的 KSU 侧集成层由兼容补丁脚本注入）
-#   BBR        —— TCP 拥塞控制
-#   DroidSpace —— 容器化 Android
-#   NoMount    —— 挂载隐藏
-#   TG         —— 推送到 Telegram（默认关闭，需要 secrets）
-#
-# 依赖文件（随本工作流一起提交）：
-#   .github/patches/7kimisu-414-compat.sh   —— 7kimisu 4.14 兼容补丁
-#   .github/bot.py                          —— Telegram 上传脚本
-#
-# 触发方式：仅 workflow_dispatch（手动）
-# 源码分支：由 Branch 输入项决定，默认 main
-# ============================================================================
-
 name: Build Kernel for MT6853
 
 on:
   workflow_dispatch:
     inputs:
 
-      # ---------------- Root 方案 ----------------
       SU:
         type: choice
         description: "选择要使用的 Root 管理器"
@@ -39,22 +14,21 @@ on:
           - BakaSU
           - 7kimisu
 
-      # ---------------- 可选内核特性 ----------------
-      SUSFS:
-        type: boolean
-        description: "是否加入 SUSFS"
-        required: false
-        default: false
-
       BBR:
         type: boolean
         description: "是否启用 BBR 加速（不了解请不要启用）"
         required: false
         default: true
-
+        
       DroidSpace:
         type: boolean
         description: "是否启用 DroidSpace（不了解请不要启用）"
+        required: false
+        default: false
+
+      SUSFS:
+        type: boolean
+        description: "是否加入 SUSFS"
         required: false
         default: false
 
@@ -64,7 +38,6 @@ on:
         required: false
         default: false
 
-      # ---------------- 其他 ----------------
       TG:
         type: boolean
         description: "!!!请勿开启!!!/Don't Open"
@@ -79,6 +52,7 @@ on:
         options:
           - main
 
+    
 jobs:
   build:
 
@@ -88,12 +62,6 @@ jobs:
       packages: read
 
     steps:
-
-    # ------------------------------------------------------------------
-    # 0. 准备工作区
-    #    checkout 当前分支：提供 .github/patches/ 补丁脚本与 .github/bot.py
-    #    内核源码随后单独 clone 到 kernel_workspace/android-kernel
-    # ------------------------------------------------------------------
     - uses: actions/checkout@v4
 
     - name: Setup build environment
@@ -105,35 +73,30 @@ jobs:
     - name: Download GCC toolchain
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-
+        
         mkdir gcc64
         wget -O gcc-aarch64.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
         tar -C gcc64/ -zxvf gcc-aarch64.tar.gz
-
+    
         mkdir gcc32
         wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
         tar -C gcc32/ -zxvf gcc-arm.tar.gz
-
+    
     - name: Install Clang toolchain
       run: |
         sudo apt install -y clang lld llvm
-
+    
     - name: Clone kernel source
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         CLONE_BRANCH="${{ github.event.inputs.Branch }}"
         echo "使用 $CLONE_BRANCH 分支"
-        git clone -b "$CLONE_BRANCH" --single-branch ${{ github.server_url }}/${{ github.repository }}.git android-kernel
+        git clone -b "$CLONE_BRANCH" --single-branch https://github.com/sanba0519/OPPO-Realme_kernel_4.14_MT6853.git android-kernel
+        cd android-kernel
 
-    # ------------------------------------------------------------------
-    # 1. 应用 hook 层 / VFS 层补丁
-    #    RKSU/BakaSU 打各自官方 4.14 patch；7kimisu 无需 manual hook
-    #    SUSFS 的 VFS 层补丁三种方案通用，KSU 侧集成放在下一步
-    # ------------------------------------------------------------------
     - name: Apply patch
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-
         if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
           echo "KSU_LOG: 选择了 RKSU"
           echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
@@ -154,33 +117,28 @@ jobs:
 
         elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
           echo "KSU_LOG: 选择了 7kimisu"
-          echo "KSU_LOG: 7kimisu 使用 kprobe + syscall 表补丁方案，无需 manual hook patch"
-
+          echo "KSU_LOG: 跳过官方 manual hook patch，4.14 适配由 7kimisu-414-compat.sh 统一完成"
         else
           echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
         fi
 
-        # SUSFS VFS 层（官方补丁只含 VFS 半套，KSU 侧在 Setup KernelSU 处理）
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+
         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
           echo "KSU_LOG: 开启 SUSFS"
           wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
-          # GNU C89 不允许标签后直接跟声明，4.14 源码必须补分号
+          # A label cannot be followed directly by a declaration in GNU C89.
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
             || { echo "SUSFS fdinfo 4.14 兼容修正失败"; exit 1; }
         fi
 
-    # ------------------------------------------------------------------
-    # 2. 部署 KernelSU
-    #    RKSU/BakaSU 走各自官方 setup.sh
-    #    7kimisu 取上游 kernel/ 目录自行接线，并应用 4.14 兼容补丁
-    # ------------------------------------------------------------------
+
     - name: Setup KernelSU
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         rm -rf KernelSU
-        echo "KSU_LOG: [诊断] SU 实际接收值=[${{ github.event.inputs.SU }}]"
         if [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
           echo "KSU_LOG: Setup BakaSU"
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main
@@ -192,53 +150,30 @@ jobs:
               || { echo "下载 SUSFS inline hook 脚本失败"; exit 1; }
             bash susfs_inline_hook_patches.sh
           fi
-
         elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
           echo "KSU_LOG: Setup 7kimisu"
-          # 注意：不能使用 7kimisu 自带的 setup.sh —— 它内部 clone 的是上游 tiann/KernelSU，
-          # 会丢失 7kimisu 的内核侧改动。这里直接取用其 kernel/ 目录并自行接线。
-          git clone https://github.com/hartgerinktarcila-design/7kimisu.git 7kimisu-src || { echo "clone 7kimisu 失败"; exit 1; }
+          # 7kimisu 自带的 kernel/setup.sh 实际 clone 官方 tiann/KernelSU，
+          # 不能用于放置定制代码，这里直接取仓库的 kernel/ + uapi/
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          curl -LfsS https://github.com/hartgerinktarcila-design/7kimisu/archive/refs/heads/main.tar.gz -o 7kimisu.tar.gz \
+            || { echo "下载 7kimisu 源码失败"; exit 1; }
           rm -rf drivers/kernelsu
-          cp -r 7kimisu-src/kernel drivers/kernelsu
-          # 7kimisu 的 uapi/ 在仓库根级（不在 kernel/ 内），kernel/ 下 8 处源文件
-          # （policy/allowlist.h、policy/app_profile.h、policy/feature.h、selinux/rules.c、
-          #   sulog/event.h、supercall/dispatch.c、supercall/supercall.c、manager/apk_sign.c）
-          # 均以 "uapi/xxx.h" 引号形式引用，内嵌构建下由 Kbuild 的
-          # -I$(KSU_KERNEL_DIR)（即 drivers/kernelsu）解析，必须一并拷入，
-          # 否则报 fatal error: 'uapi/app_profile.h' file not found
-          if [ -d 7kimisu-src/uapi ]; then
-            cp -r 7kimisu-src/uapi drivers/kernelsu/uapi
-          fi
-          [ -f drivers/kernelsu/uapi/app_profile.h ] || { echo "7kimisu uapi 头文件缺失"; exit 1; }
-          # 7kimisu 的 kernel/Makefile 是外部模块（LKM）构建入口，内嵌构建必须移除，否则 Kbuild 会优先使用它
-          rm -f drivers/kernelsu/Makefile
-          # 带入 .git 以便 Kbuild 计算 KSU_VERSION
-          cp -r 7kimisu-src/.git drivers/kernelsu/.git
-
-          # 应用 4.14 兼容补丁
-          # SUSFS 开启时传 susfs 参数：注入 KSU 侧集成层
-          # （susfs_ksu.c / Kconfig 选项 / Kbuild 接线 / second_stage 默认路径）
-          SUSFS_COMPAT_ARG=""
-          if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-            SUSFS_COMPAT_ARG="susfs"
-          fi
-          bash "$GITHUB_WORKSPACE/.github/patches/7kimisu-414-compat.sh" drivers/kernelsu $SUSFS_COMPAT_ARG \
-            || { echo "7kimisu 4.14 兼容补丁应用失败"; exit 1; }
-
-          # 接线（幂等）
+          mkdir -p drivers/kernelsu
+          tar -xzf 7kimisu.tar.gz --strip-components=2 -C drivers/kernelsu 7kimisu-main/kernel
+          tar -xzf 7kimisu.tar.gz --strip-components=1 -C drivers/kernelsu 7kimisu-main/uapi
+          rm -f 7kimisu.tar.gz
+          test -f drivers/kernelsu/Kbuild || { echo "7kimisu kernel/ 放置失败"; exit 1; }
+          test -f drivers/kernelsu/uapi/ksu.h || { echo "7kimisu uapi/ 放置失败"; exit 1; }
+          # drivers 注入（幂等）
           grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile \
-            || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
-          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig \
-            || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-
+            || printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
+          grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig \
+            || sed -i '0,/endmenu/ s/^endmenu$/source "drivers\/kernelsu\/Kconfig"\nendmenu/' drivers/Kconfig
         else
           echo "KSU_LOG: Setup RKSU (rsuntk)"
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
         fi
 
-    # ------------------------------------------------------------------
-    # 3. NoMount（可选）
-    # ------------------------------------------------------------------
     - name: Setup NoMount
       if: ${{ github.event.inputs.nomount == 'true' }}
       run: |
@@ -250,15 +185,25 @@ jobs:
           || { echo "下载 NoMount setup 脚本失败"; exit 1; }
         bash nomount-setup.sh dev
 
+    - name: Apply 7kimisu 4.14 compat
+      if: ${{ github.event.inputs.SU == '7kimisu' }}
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        # 脚本来自本仓库 scripts/ 目录（需提交进仓库）
+        cp $GITHUB_WORKSPACE/scripts/7kimisu-414-compat.sh .
+        if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
+          bash 7kimisu-414-compat.sh drivers/kernelsu susfs
+        else
+          bash 7kimisu-414-compat.sh drivers/kernelsu
+        fi
+
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
-        key: build-kernel-mido-kernel
-        max-size: 3G
+        key: kernel-${{ github.event.inputs.SU }}-${{ github.event.inputs.SUSFS }}-${{ github.event.inputs.BBR }}-${{ github.event.inputs.DroidSpace }}-${{ github.event.inputs.nomount }}
+        max-size: 5G
 
-    # ------------------------------------------------------------------
-    # 4. 配置与编译
-    # ------------------------------------------------------------------
+ 
     - name: Configure and build kernel
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
@@ -270,7 +215,7 @@ jobs:
 
         make -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig
 
-        # ---- DroidSpace ----
+        # DroidSpace
         if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
           echo "启用 DroidSpace..."
           ./scripts/config --file out/.config \
@@ -318,14 +263,27 @@ jobs:
             --enable NETFILTER_XT_MATCH_ADDRTYPE \
             --enable NF_CONNTRACK_NETLINK \
             --enable NF_NAT_REDIRECT \
+            --enable IP_ADVANCED_ROUTER \
+            --enable IP_MULTIPLE_TABLES \
+            --enable NF_CONNTRACK_IPV4 \
+            --enable NF_NAT_IPV4 \
+            --enable IP_NF_NAT \
+            --enable NETFILTER_XT_MATCH_COMMENT \
+            --enable NETFILTER_XT_MATCH_STATE \
+            --enable NETFILTER_XT_MATCH_CONNTRACK \
+            --enable NETFILTER_XT_MATCH_MULTIPORT \
+            --enable NETFILTER_XT_MATCH_HL \
+            --enable NETFILTER_XT_TARGET_REJECT \
             --enable IP_NF_TARGET_REJECT \
-            --enable IP_NF_MATCH_RECENT \
-            --enable IP_NF_MATCH_LIMIT \
-            --enable IP_NF_MATCH_HASHLIMIT \
-            --enable IP_NF_MATCH_OWNER \
-            --enable IP_NF_MATCH_PKTTYPE \
-            --enable IP_NF_MATCH_MARK \
-            --enable IP_NF_TARGET_MARK \
+            --enable NETFILTER_XT_TARGET_LOG \
+            --enable IP_NF_TARGET_ULOG \
+            --enable NETFILTER_XT_MATCH_RECENT \
+            --enable NETFILTER_XT_MATCH_LIMIT \
+            --enable NETFILTER_XT_MATCH_HASHLIMIT \
+            --enable NETFILTER_XT_MATCH_OWNER \
+            --enable NETFILTER_XT_MATCH_PKTTYPE \
+            --enable NETFILTER_XT_MATCH_MARK \
+            --enable NETFILTER_XT_TARGET_MARK \
             --enable IP_SET \
             --enable IP_SET_HASH_IP \
             --enable IP_SET_HASH_NET \
@@ -339,7 +297,7 @@ jobs:
           echo "不启用 DroidSpace，使用默认配置"
         fi
 
-        # ---- BBR ----
+        # BBR
         if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
           echo "启用 BBR..."
           ./scripts/config --file out/.config \
@@ -350,7 +308,7 @@ jobs:
           echo "不启用 BBR..."
         fi
 
-        # ---- 最终配置修正 ----
+        # 最终配置修正
         # DroidSpace 需要 USER_NS（docker unsafe procfs 修复），仅在启用时保留
         if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
           ./scripts/config --file out/.config \
@@ -368,7 +326,7 @@ jobs:
                   --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
         fi
 
-        # ---- KernelSU / SUSFS ----
+        # KernelSU 和 SUSFS 配置
         # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
           echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
@@ -377,17 +335,6 @@ jobs:
             --enable CONFIG_KSU_SUSFS \
             --disable CONFIG_KSU_MANUAL_HOOK \
             --disable CONFIG_KSU_TRACEPOINT_HOOK
-          if [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
-            echo "KSU_LOG: 7kimisu + SUSFS：启用子选项与 kprobe 依赖"
-            ./scripts/config --file out/.config \
-              --enable CONFIG_KSU_SUSFS_SUS_PATH \
-              --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
-              --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
-              --enable CONFIG_KPROBES \
-              --enable CONFIG_HAVE_KPROBES \
-              --enable CONFIG_KPROBE_EVENTS \
-              --enable CONFIG_KRETPROBES
-          fi
         elif [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
           echo "KSU_LOG: BakaSU 不启用 SUSFS，使用 manual hook"
           ./scripts/config --file out/.config \
@@ -396,18 +343,11 @@ jobs:
             --disable CONFIG_KSU_SUSFS \
             --disable CONFIG_KSU_TRACEPOINT_HOOK
         elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
-          echo "KSU_LOG: 7kimisu 使用 kprobe 方案，启用 KPROBES/KRETPROBES"
-          ./scripts/config --file out/.config \
-            --enable CONFIG_KSU \
-            --enable CONFIG_KPROBES \
-            --enable CONFIG_HAVE_KPROBES \
-            --enable CONFIG_KPROBE_EVENTS \
-            --enable CONFIG_KRETPROBES \
-            --disable CONFIG_KSU_MANUAL_HOOK \
-            --disable CONFIG_KSU_SUSFS
+          echo "KSU_LOG: 7kimisu：Kconfig 仅有 CONFIG_KSU（SUSFS 选项由 compat 脚本注入，见上方分支）"
+          ./scripts/config --file out/.config --enable CONFIG_KSU
         fi
 
-        # ---- NoMount ----
+
         if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
           echo "启用 NoMount..."
           ./scripts/config --file out/.config \
@@ -420,7 +360,6 @@ jobs:
 
         make O=out ARCH=arm64 olddefconfig
 
-        # ---- 配置生效校验 ----
         if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
           grep -qx 'CONFIG_NOMOUNT=y' out/.config \
             && grep -qx 'CONFIG_KEYS=y' out/.config \
@@ -430,22 +369,7 @@ jobs:
           exit 1
         fi
 
-        # 7kimisu 依赖检查
-        if [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
-          grep -qx 'CONFIG_KSU=y' out/.config \
-            && grep -qx 'CONFIG_KPROBES=y' out/.config \
-            || { echo "CONFIG_KSU 或 CONFIG_KPROBES 未生效，终止编译"; exit 1; }
-          echo "KSU_LOG: 7kimisu 配置检查通过"
-          if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-            grep -qx 'CONFIG_KSU_SUSFS=y' out/.config \
-              && grep -qx 'CONFIG_KSU_SUSFS_SUS_PATH=y' out/.config \
-              && grep -qx 'CONFIG_KSU_SUSFS_SUS_MOUNT=y' out/.config \
-              || { echo "CONFIG_KSU_SUSFS 系列未生效，终止编译"; exit 1; }
-            echo "KSU_LOG: 7kimisu + SUSFS 配置检查通过"
-          fi
-        fi
-
-        # ---- 编译 ----
+        # 编译（显式目标，避免依赖默认 all 的行为差异）
         make -j"$(nproc)" \
                 O=out \
                 ARCH=arm64 \
@@ -460,18 +384,20 @@ jobs:
                 NM=llvm-nm \
                 OBJCOPY=llvm-objcopy \
                 OBJDUMP=llvm-objdump \
-                STRIP=llvm-strip
+                STRIP=llvm-strip \
+                Image.gz-dtb
 
-    # ------------------------------------------------------------------
-    # 5. 打包与上传
-    # ------------------------------------------------------------------
+        # 构建自检：产物存在且 KSU 符号在 vmlinux 中（防 ccache 假完成）
+        test -s out/arch/arm64/boot/Image.gz-dtb || { echo "Image.gz-dtb 缺失或为空"; exit 1; }
+        ls -lh out/arch/arm64/boot/Image.gz-dtb
+        aarch64-linux-gnu-nm out/vmlinux | grep -q " ksu_" \
+          || { echo "vmlinux 中无 KSU 符号，构建异常"; exit 1; }
+
     - name: Generate artifact name
       id: gen_name
       run: |
         if [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
           NAME="MT6853-BakaSU"
-        elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
-          NAME="MT6853-7kimisu"
         else
           NAME="MT6853-RKSU"
         fi
@@ -488,7 +414,7 @@ jobs:
           NAME="${NAME}-NoMount"
         fi
         echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
-
+                
     - name: Package AnyKernel3
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
@@ -530,8 +456,6 @@ jobs:
           echo "📦 Feature:"
           if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
             echo "Root方案:  RKSU"
-          elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
-            echo "Root方案:  7kimisu"
           else
             echo "Root方案:  BakaSU"
           fi
@@ -586,3 +510,6 @@ jobs:
         echo "------------正在上传到 Telegram------------"
         pip3 install telethon
         python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
+
+      
+      
