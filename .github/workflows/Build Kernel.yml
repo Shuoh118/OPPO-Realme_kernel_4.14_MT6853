@@ -42,7 +42,7 @@ on:
       # ---------------- 可选内核特性 ----------------
       SUSFS:
         type: boolean
-        description: "是否加入 SUSFS（RKSU/BakaSU 用官方集成；7kimisu 用内置集成层）"
+        description: "是否加入 SUSFS"
         required: false
         default: false
 
@@ -162,7 +162,7 @@ jobs:
 
         # SUSFS VFS 层（官方补丁只含 VFS 半套，KSU 侧在 Setup KernelSU 处理）
         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-          echo "KSU_LOG: 开启 SUSFS，应用 VFS 层补丁"
+          echo "KSU_LOG: 开启 SUSFS"
           wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
           # GNU C89 不允许标签后直接跟声明，4.14 源码必须补分号
