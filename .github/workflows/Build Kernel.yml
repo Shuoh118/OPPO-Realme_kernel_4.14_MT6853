@@ -1,18 +1,9 @@
-name: Build Kernel for MT6853
+name: Build 7kimisu Kernel
 
 on:
   workflow_dispatch:
     inputs:
 
-      SU:
-        type: choice
-        description: "选择要使用的 Root 管理器（默认 7kimisu，构建 RKSU/BakaSU 请手动选回）"
-        required: true
-        default: 7kimisu
-        options:
-          - RKSU
-          - BakaSU
-          - 7kimisu
 
       BBR:
         type: boolean
@@ -97,13 +88,13 @@ jobs:
     - name: Apply patch
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
+        if [ "7kimisu" = "RKSU" ]; then
           echo "KSU_LOG: 选择了 RKSU"
           echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
           wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
           patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
 
-        elif [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
+        elif [ "7kimisu" = "BakaSU" ]; then
           echo "KSU_LOG: 选择了 BakaSU"
           if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
             echo "KSU_LOG: SUSFS 使用 BakaSU inline hooks，跳过 4.14 manual hook patch"
@@ -115,7 +106,7 @@ jobs:
             patch -p1 < BakaSU-4.14.patch || { echo "BakaSU 官方 patch 应用失败"; cat BakaSU-4.14.patch; exit 1; }
           fi
 
-        elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
+        elif [ "7kimisu" = "7kimisu" ]; then
           echo "KSU_LOG: 选择了 7kimisu"
           echo "KSU_LOG: 跳过官方 manual hook patch，4.14 适配由 7kimisu-414-compat.sh 统一完成"
         else
@@ -139,7 +130,7 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         rm -rf KernelSU
-        if [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
+        if [ "7kimisu" = "BakaSU" ]; then
           echo "KSU_LOG: Setup BakaSU"
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main
           if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
@@ -150,7 +141,7 @@ jobs:
               || { echo "下载 SUSFS inline hook 脚本失败"; exit 1; }
             bash susfs_inline_hook_patches.sh
           fi
-        elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
+        elif [ "7kimisu" = "7kimisu" ]; then
           echo "KSU_LOG: Setup 7kimisu"
           # 7kimisu 自带的 kernel/setup.sh 实际 clone 官方 tiann/KernelSU，
           # 不能用于放置定制代码，这里直接取仓库的 kernel/ + uapi/
@@ -186,7 +177,6 @@ jobs:
         bash nomount-setup.sh dev
 
     - name: Apply 7kimisu 4.14 compat
-      if: ${{ github.event.inputs.SU == '7kimisu' }}
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         # 脚本位于本仓库 .github/patches/ 目录（已上传，勿改动内容）
@@ -344,14 +334,14 @@ jobs:
             --enable CONFIG_KSU_SUSFS \
             --disable CONFIG_KSU_MANUAL_HOOK \
             --disable CONFIG_KSU_TRACEPOINT_HOOK
-        elif [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
+        elif [ "7kimisu" = "BakaSU" ]; then
           echo "KSU_LOG: BakaSU 不启用 SUSFS，使用 manual hook"
           ./scripts/config --file out/.config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_MANUAL_HOOK \
             --disable CONFIG_KSU_SUSFS \
             --disable CONFIG_KSU_TRACEPOINT_HOOK
-        elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
+        elif [ "7kimisu" = "7kimisu" ]; then
           echo "KSU_LOG: 7kimisu：Kconfig 仅有 CONFIG_KSU（SUSFS 选项由 compat 脚本注入，KPROBES 依赖已在上面统一满足）"
           ./scripts/config --file out/.config --enable CONFIG_KSU
         fi
@@ -408,7 +398,7 @@ jobs:
     - name: Generate artifact name
       id: gen_name
       run: |
-        if [ "${{ github.event.inputs.SU }}" = "BakaSU" ]; then
+        if [ "7kimisu" = "BakaSU" ]; then
           NAME="MT6853-BakaSU"
         else
           NAME="MT6853-RKSU"
@@ -466,7 +456,7 @@ jobs:
           echo "Oplus/Realme MT6853 Universal Kernel -- A12"
           echo ""
           echo "📦 Feature:"
-          if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
+          if [ "7kimisu" = "RKSU" ]; then
             echo "Root方案:  RKSU"
           else
             echo "Root方案:  BakaSU"
