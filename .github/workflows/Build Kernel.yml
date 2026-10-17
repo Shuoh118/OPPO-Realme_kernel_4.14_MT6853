@@ -346,6 +346,11 @@ jobs:
             --disable CONFIG_KSU_TRACEPOINT_HOOK
         elif [ "${{ github.event.inputs.SU }}" = "7kimisu" ]; then
           echo "KSU_LOG: 7kimisu：Kconfig 仅有 CONFIG_KSU（SUSFS 选项由 compat 脚本注入，见上方分支）"
+          # 7kimisu 的 config KSU depends on KPROBES && EXT4_FS；
+          # mt6853 defconfig 默认 CONFIG_KPROBES=n，不先开依赖的话 CONFIG_KSU 不可见，
+          # --enable 会静默无效（症状：编译正常但 vmlinux 无 ksu_ 符号）
+          ./scripts/config --file out/.config --enable CONFIG_KPROBES
+          ./scripts/config --file out/.config --enable CONFIG_EXT4_FS
           ./scripts/config --file out/.config --enable CONFIG_KSU
         fi
 
@@ -361,6 +366,9 @@ jobs:
         fi
 
         make O=out ARCH=arm64 olddefconfig
+
+        grep -qx 'CONFIG_KSU=y' out/.config \
+          || { echo "CONFIG_KSU 未生效（检查 KPROBES 依赖或 drivers/Kconfig source 注入）"; exit 1; }
 
         if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
           grep -qx 'CONFIG_NOMOUNT=y' out/.config \
