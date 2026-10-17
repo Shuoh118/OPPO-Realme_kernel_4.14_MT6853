@@ -394,15 +394,14 @@ jobs:
         ls -lh out/arch/arm64/boot/Image.gz-dtb
         aarch64-linux-gnu-nm out/vmlinux | grep -q " ksu_" \
           || { echo "vmlinux 中无 KSU 符号，构建异常"; exit 1; }
+        echo "KSU_LOG: vmlinux 中 KSU 符号数 = $(aarch64-linux-gnu-nm out/vmlinux | grep -c ' ksu_' || true)"
+        ccache -s || true
 
     - name: Generate artifact name
       id: gen_name
       run: |
-        if [ "7kimisu" = "BakaSU" ]; then
-          NAME="MT6853-BakaSU"
-        else
-          NAME="MT6853-RKSU"
-        fi
+        # SU 在本工作流中硬编码为 7kimisu；二元判断会让 7kimisu 落入 else 被误命名为 RKSU
+        NAME="MT6853-7kimisu"
         if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
           NAME="${NAME}-BBR"
         fi
@@ -456,11 +455,7 @@ jobs:
           echo "Oplus/Realme MT6853 Universal Kernel -- A12"
           echo ""
           echo "📦 Feature:"
-          if [ "7kimisu" = "RKSU" ]; then
-            echo "Root方案:  RKSU"
-          else
-            echo "Root方案:  BakaSU"
-          fi
+          echo "Root方案:  7kimisu"
           if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
             echo "✅ BBR"
           else
