@@ -6,9 +6,9 @@ on:
 
       SU:
         type: choice
-        description: "选择要使用的 Root 管理器"
+        description: "选择要使用的 Root 管理器（默认 7kimisu，构建 RKSU/BakaSU 请手动选回）"
         required: true
-        default: RKSU
+        default: 7kimisu
         options:
           - RKSU
           - BakaSU
