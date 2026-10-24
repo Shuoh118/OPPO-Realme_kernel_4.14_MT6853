@@ -124,9 +124,7 @@ jobs:
           echo "KSU_LOG: 开启 SUSFS"
           wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_compat_nofail.sh -O susfs_compat_nofail.sh
-          bash susfs_compat_nofail.sh
-          
+
           # A label cannot be followed directly by a declaration in GNU C89.
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
@@ -148,6 +146,14 @@ jobs:
               -o susfs_inline_hook_patches.sh \
               || { echo "下载 SUSFS inline hook 脚本失败"; exit 1; }
             bash susfs_inline_hook_patches.sh
+
+            # BakaSU 的 susfs_compat.mk 会无条件 $(error "Please wait simonpunk") 拦截构建，
+            # 必须在 setup.sh 克隆源码之后跑，注释掉该拦截，否则 make 阶段会被挡死
+            echo "KSU_LOG: 关闭 BakaSU susfs_compat.mk 的 Please wait simonpunk 拦截"
+            wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_compat_nofail.sh -O susfs_compat_nofail.sh \
+              || { echo "下载 susfs_compat_nofail.sh 失败"; exit 1; }
+            bash susfs_compat_nofail.sh \
+              || { echo "susfs_compat_nofail.sh 执行失败，BakaSU 拦截未解除，编译必然失败"; exit 1; }
           fi
         else
           echo "KSU_LOG: Setup RKSU (rsuntk)"
