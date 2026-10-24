@@ -124,6 +124,9 @@ jobs:
           echo "KSU_LOG: 开启 SUSFS"
           wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
+          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_compat_nofail.sh -O susfs_compat_nofail.sh
+          bash susfs_compat_nofail.sh
+          
           # A label cannot be followed directly by a declaration in GNU C89.
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
